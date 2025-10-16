@@ -5,7 +5,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 const app = express();
-app.use(cors({ origin: "http://172.20.10.2:5501" })); // change if needed
+app.use(cors({ origin: "https://retool-page.vercel.app" })); // change if needed
 app.use(express.json());
 
 const SHOPIFY_STORE = process.env.STORE_NAME;
