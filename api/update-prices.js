@@ -1,7 +1,7 @@
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-import cors from "cors";
-import express from "express";
+// import cors from "cors";
+// import express from "express";
 
 dotenv.config();
 
@@ -85,20 +85,28 @@ async function updateAllProducts(gold_rate_14, gold_rate_18, labour_rate_less, l
   return updatedCount;
 }
 
-// ✅ Express setup (for CORS support)
-const app = express();
-app.use(cors({ origin: "https://retool-page.vercel.app" }));
-app.use(express.json());
+export default async function handler(req, res) {
+  // Handle CORS preflight
+  res.setHeader("Access-Control-Allow-Origin", "https://retool-page.vercel.app");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-app.post("/update-prices", async (req, res) => {
+  if (req.method === "OPTIONS") {
+    return res.status(200).end(); // Preflight request
+  }
+
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
   try {
     const { gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate } = req.body;
-    const updatedCount = await updateAllProducts(gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate);
+    const updatedCount = await updateAllProducts(
+      gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate
+    );
     res.status(200).json({ message: "Prices updated successfully", updatedCount });
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.toString() });
   }
-});
-
-// ✅ Export the app — Vercel will handle it (no app.listen)
-export default app;
+}
