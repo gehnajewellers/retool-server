@@ -89,6 +89,7 @@ let hasMore = true;
             console.warn(`⚠️ Failed updating ${product.title}`);
           }
         }
+        await new Promise(r => setTimeout(r, 300));
       } catch (err) {
         console.error(`❌ Error with ${product.title}:`, err.message);
       }
