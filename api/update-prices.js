@@ -1,30 +1,46 @@
 import fetch from "node-fetch";
 import dotenv from "dotenv";
-// import cors from "cors";
-// import express from "express";
 
 dotenv.config();
 
 const SHOPIFY_STORE = process.env.STORE_NAME;
 const ACCESS_TOKEN = process.env.ACCESS_TOKEN;
 
-async function updateAllProducts(gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate) {
-let hasMore = true;
+// Helper: delay for ms milliseconds
+const delay = (ms) => new Promise((res) => setTimeout(res, ms));
+
+// Helper: fetch with automatic retry on 429
+async function fetchWithRetry(url, options, retries = 3) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const res = await fetch(url, options);
+
+    if (res.status !== 429) return res;
+
+    // Shopify rate limit hit
+    const retryAfter = parseInt(res.headers.get("Retry-After") || "2", 10);
+    console.log(`⚠️ 429 received. Retrying after ${retryAfter}s (attempt ${attempt + 1})`);
+    await delay(retryAfter * 1000);
+  }
+  throw new Error("Max retries reached for 429");
+}
+
+// Function to update products in batches
+async function updateAllProducts(gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate, batchSize = 10) {
+  let hasMore = true;
   let nextPageInfo = null;
   let updatedCount = 0;
 
   while (hasMore) {
     const url = new URL(`https://${SHOPIFY_STORE}/admin/api/2023-10/products.json`);
-    url.searchParams.set("limit", "50");
+    url.searchParams.set("limit", batchSize.toString());
     url.searchParams.set("status", "active");
     if (nextPageInfo) url.searchParams.set("page_info", nextPageInfo);
 
-    const res = await fetch(url, {
-      headers: { "X-Shopify-Access-Token": ACCESS_TOKEN }
-    });
-
-    if (!res.ok) {
-      console.error("❌ Error fetching products:", res.statusText);
+    let res;
+    try {
+      res = await fetchWithRetry(url, { headers: { "X-Shopify-Access-Token": ACCESS_TOKEN } });
+    } catch (err) {
+      console.error("❌ Error fetching products:", err.message);
       break;
     }
 
@@ -33,39 +49,28 @@ let hasMore = true;
 
     for (const product of data.products) {
       try {
-        // Fetch metafields for this product
-        const metaRes = await fetch(
+        const metaRes = await fetchWithRetry(
           `https://${SHOPIFY_STORE}/admin/api/2023-10/products/${product.id}/metafields.json`,
           { headers: { "X-Shopify-Access-Token": ACCESS_TOKEN } }
         );
-
         const { metafields } = await metaRes.json();
         if (!metafields) continue;
 
-        let gold_weight = parseFloat(metafields.find(m => m.key === "gold_weight")?.value) || 0 ;
+        let gold_weight = parseFloat(metafields.find(m => m.key === "gold_weight")?.value) || 0;
         let diamond_price = parseInt(metafields.find(m => m.key === "diamond_cost")?.value) || 0;
-        let product_purity = parseInt(metafields.find(m => m.key === "gold_purity")?.value) || 0 ;
+        let product_purity = parseInt(metafields.find(m => m.key === "gold_purity")?.value) || 0;
         let colour_stone_price = parseInt(metafields.find(m => m.key === "colour_stone_cost")?.value) || 0;
 
-        console.log({gold_weight, diamond_price, product_purity, colour_stone_price});
-
-        // calculate gold price
         const appliedGoldRate = product_purity === 18 ? gold_rate_18 : gold_rate_14;
         const goldPrice = appliedGoldRate * gold_weight;
-
-        // calculate labour price
-        const appliedlabourRate = gold_weight < 5 ? labour_rate_less : labour_rate_greater
-        const labourPrice = appliedlabourRate * gold_weight;
-
-        // calculate product base price
+        const appliedLabourRate = gold_weight < 5 ? labour_rate_less : labour_rate_greater;
+        const labourPrice = appliedLabourRate * gold_weight;
         const basePrice = goldPrice + labourPrice + diamond_price + colour_stone_price;
-
-        // calculate product final price
         const finalPrice = basePrice + (basePrice * gst_rate / 100);
-        
+
         const variantId = product.variants[0]?.id;
         if (variantId) {
-          const updateRes = await fetch(
+          await fetchWithRetry(
             `https://${SHOPIFY_STORE}/admin/api/2023-10/variants/${variantId}.json`,
             {
               method: "PUT",
@@ -73,29 +78,19 @@ let hasMore = true;
                 "X-Shopify-Access-Token": ACCESS_TOKEN,
                 "Content-Type": "application/json"
               },
-              body: JSON.stringify({
-                variant: {
-                  id: variantId,
-                  price: finalPrice.toFixed(2)
-                }
-              })
+              body: JSON.stringify({ variant: { id: variantId, price: finalPrice.toFixed(2) } })
             }
           );
-
-          if (updateRes.ok) {
-            console.log(`✅ Updated ${product.title} → ₹${finalPrice.toFixed(2)}`);
-            updatedCount++;
-          } else {
-            console.warn(`⚠️ Failed updating ${product.title}`);
-          }
+          updatedCount++;
         }
-        await new Promise(r => setTimeout(r, 300));
+
+        await delay(400); // delay between updating each product to avoid hitting rate limit
       } catch (err) {
-        console.error(`❌ Error with ${product.title}:`, err.message);
+        console.warn(`⚠️ Failed updating ${product.title}:`, err.message);
       }
     }
 
-    // Handle pagination (from Link header)
+    // Handle pagination
     const linkHeader = res.headers.get("link");
     if (linkHeader && linkHeader.includes('rel="next"')) {
       const match = linkHeader.match(/page_info=([^&>]+)/);
@@ -109,19 +104,15 @@ let hasMore = true;
   return updatedCount;
 }
 
+// ✅ Serverless handler
 export default async function handler(req, res) {
-  // Handle CORS preflight
+  // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "https://retool-page.vercel.app");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-  if (req.method === "OPTIONS") {
-    return res.status(200).end(); 
-  }
-
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
+  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
     const { gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate } = req.body;
