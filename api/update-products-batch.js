@@ -76,6 +76,16 @@ export default async function handler(req, res) {
               body: JSON.stringify({ variant: { id: product.variantId, price: finalPrice.toFixed(2) } })
             }
           );
+
+          console.log({
+            title:product.title,
+            gold_weight,
+            diamond_price,
+            product_purity,
+            colour_stone_price,
+            appliedGoldRate,
+            basePrice,
+          })
           
           console.log(`✅ Updated ${product.title} → ₹${finalPrice.toFixed(2)}`);
           results.push({ id: product.id, title: product.title, status: "success", price: finalPrice.toFixed(2) });
