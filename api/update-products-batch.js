@@ -70,6 +70,7 @@ export default async function handler(req, res) {
               body: JSON.stringify({ variant: { id: product.variantId, price: finalPrice.toFixed(2) } })
             }
           );
+          console.log(`✅ Updated ${product.title} → ₹${finalPrice.toFixed(2)}`);
           results.push({ id: product.id, status: "success" });
         }
         await delay(400); // throttle
