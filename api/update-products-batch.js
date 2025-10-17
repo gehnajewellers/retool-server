@@ -32,7 +32,7 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
   try {
-    const { products, gold_rate_14, gold_rate_18, labour_rate_less, labour_rate_greater, gst_rate } = req.body;
+    const { products, gold_rate_14, gold_rate_18, gold_rate_22, labour_rate_less, labour_rate_greater, gst_rate } = req.body;
 
     const results = [];
 
@@ -48,10 +48,16 @@ export default async function handler(req, res) {
 
         const gold_weight = parseFloat(metafields.find(m => m.key === "gold_weight")?.value) || 0;
         const diamond_price = parseInt(metafields.find(m => m.key === "diamond_cost")?.value) || 0;
-        const product_purity = parseInt(metafields.find(m => m.key === "gold_purity")?.value) || 0;
+        const product_purity = parseInt(metafields.find(m => m.key === "gold_purity")?.value) || 18;
         const colour_stone_price = parseInt(metafields.find(m => m.key === "colour_stone_cost")?.value) || 0;
 
-        const appliedGoldRate = product_purity === 18 ? gold_rate_18 : gold_rate_14;
+        const goldRates = {
+          14: gold_rate_14,
+          18: gold_rate_18,
+          22: gold_rate_22
+        };
+
+        const appliedGoldRate = goldRates[product_purity] || gold_rate_18;
         const goldPrice = appliedGoldRate * gold_weight;
         const appliedLabourRate = gold_weight < 5 ? labour_rate_less : labour_rate_greater;
         const labourPrice = appliedLabourRate * gold_weight;
@@ -70,13 +76,14 @@ export default async function handler(req, res) {
               body: JSON.stringify({ variant: { id: product.variantId, price: finalPrice.toFixed(2) } })
             }
           );
+          
           console.log(`✅ Updated ${product.title} → ₹${finalPrice.toFixed(2)}`);
-          results.push({ id: product.id, status: "success" });
+          results.push({ id: product.id, title: product.title, status: "success", price: finalPrice.toFixed(2) });
         }
         await delay(400); // throttle
       } catch (err) {
         console.warn(`⚠️ Failed updating ${product.title}:`, err.message);
-        results.push({ id: product.id, status: "failed", error: err.message });
+        results.push({ id: product.id, title: product.title, status: "failed", error: err.message });
       }
     }
 
