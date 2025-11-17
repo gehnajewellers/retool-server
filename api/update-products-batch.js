@@ -61,8 +61,13 @@ export default async function handler(req, res) {
         const goldPrice = appliedGoldRate * gold_weight;
         const appliedLabourRate = gold_weight < 5 ? labour_rate_less : labour_rate_greater;
         const labourPrice = appliedLabourRate * gold_weight;
+
+        // --- Price Calculation ---
         const basePrice = goldPrice + labourPrice + diamond_price + colour_stone_price;
         const finalPrice = basePrice + (basePrice * gst_rate / 100);
+
+        // 👉 ROUND TO NEAREST ₹500  
+        const roundedPrice = Math.ceil(finalPrice / 500) * 500;
 
         if (product.variantId) {
           await fetchWithRetry(
@@ -73,23 +78,26 @@ export default async function handler(req, res) {
                 "X-Shopify-Access-Token": ACCESS_TOKEN,
                 "Content-Type": "application/json"
               },
-              body: JSON.stringify({ variant: { id: product.variantId, price: finalPrice.toFixed(2) } })
+              body: JSON.stringify({ variant: { id: product.variantId, price: roundedPrice } })
             }
           );
 
           console.log({
-            title:product.title,
+            title: product.title,
             gold_weight,
             diamond_price,
             product_purity,
             colour_stone_price,
             appliedGoldRate,
             basePrice,
-          })
-          
-          console.log(`✅ Updated ${product.title} → ₹${finalPrice.toFixed(2)}`);
-          results.push({ id: product.id, title: product.title, status: "success", price: finalPrice.toFixed(2) });
+            finalPrice,
+            roundedPrice
+          });
+
+          console.log(`✅ Updated ${product.title} → ₹${roundedPrice}`);
+          results.push({ id: product.id, title: product.title, status: "success", price: roundedPrice });
         }
+
         await delay(400); // throttle
       } catch (err) {
         console.warn(`⚠️ Failed updating ${product.title}:`, err.message);
@@ -103,3 +111,4 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.toString() });
   }
 }
+
