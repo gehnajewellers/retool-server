@@ -1,3 +1,4 @@
+// api/update-products-batch.js  (replace your current file with this)
 import fetch from "node-fetch";
 import dotenv from "dotenv";
 
@@ -44,12 +45,15 @@ export default async function handler(req, res) {
         );
 
         const { metafields } = await metaRes.json();
-        if (!metafields) continue;
+        if (!metafields) {
+          results.push({ id: product.id, title: product.title, status: "failed", error: "No metafields found" });
+          continue;
+        }
 
         const gold_weight = parseFloat(metafields.find(m => m.key === "gold_weight")?.value) || 0;
-        const diamond_price = parseInt(metafields.find(m => m.key === "diamond_cost")?.value) || 0;
+        const diamond_price = parseFloat(metafields.find(m => m.key === "diamond_cost")?.value) || 0;
         const product_purity = parseInt(metafields.find(m => m.key === "gold_purity")?.value) || 18;
-        const colour_stone_price = parseInt(metafields.find(m => m.key === "colour_stone_cost")?.value) || 0;
+        const colour_stone_price = parseFloat(metafields.find(m => m.key === "colour_stone_cost")?.value) || 0;
 
         const goldRates = {
           14: gold_rate_14,
@@ -62,12 +66,16 @@ export default async function handler(req, res) {
         const appliedLabourRate = gold_weight < 5 ? labour_rate_less : labour_rate_greater;
         const labourPrice = appliedLabourRate * gold_weight;
 
-        // --- Price Calculation ---
+        // --- Price Calculation (in rupees) ---
         const basePrice = goldPrice + labourPrice + diamond_price + colour_stone_price;
         const finalPrice = basePrice + (basePrice * gst_rate / 100);
 
-        // 👉 ROUND TO NEAREST ₹500  
+        // 👉 ROUND TO NEAREST ₹500 (still in rupees)
         const roundedPrice = Math.ceil(finalPrice / 500) * 500;
+
+        // IMPORTANT: Shopify Admin API expects price as a decimal-string in major currency units
+        // e.g. "458000.00" (rupees, with two decimals)
+        const priceString = roundedPrice.toFixed(2); // "458000.00"
 
         if (product.variantId) {
           await fetchWithRetry(
@@ -78,7 +86,7 @@ export default async function handler(req, res) {
                 "X-Shopify-Access-Token": ACCESS_TOKEN,
                 "Content-Type": "application/json"
               },
-              body: JSON.stringify({ variant: { id: product.variantId, price: roundedPrice } })
+              body: JSON.stringify({ variant: { id: product.variantId, price: priceString } })
             }
           );
 
@@ -91,11 +99,14 @@ export default async function handler(req, res) {
             appliedGoldRate,
             basePrice,
             finalPrice,
-            roundedPrice
+            roundedPrice,
+            priceString
           });
 
-          console.log(`✅ Updated ${product.title} → ₹${roundedPrice}`);
-          results.push({ id: product.id, title: product.title, status: "success", price: roundedPrice });
+          console.log(`✅ Updated ${product.title} → ₹${priceString}`);
+          results.push({ id: product.id, title: product.title, status: "success", price: priceString });
+        } else {
+          results.push({ id: product.id, title: product.title, status: "skipped", error: "No variantId" });
         }
 
         await delay(400); // throttle
@@ -111,4 +122,5 @@ export default async function handler(req, res) {
     res.status(500).json({ error: err.toString() });
   }
 }
+
 
